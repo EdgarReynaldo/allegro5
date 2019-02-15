@@ -502,6 +502,7 @@ static ALLEGRO_EXTRA_DISPLAY_SETTINGS* read_pixel_format_ext(int fmt, HDC dc)
       WGL_ACCUM_BLUE_BITS_ARB,
       WGL_ACCUM_ALPHA_BITS_ARB,
       WGL_AUX_BUFFERS_ARB,
+      WGL_TRANSPARENT_ARB,
 
       /* The following are used by extensions that add to WGL_pixel_format.
        * If WGL_p_f isn't supported though, we can't use the (then invalid)
@@ -959,10 +960,8 @@ static bool create_display_internals(ALLEGRO_DISPLAY_WGL *wgl_disp)
       return false;
    }
 
-   major = _al_get_suggested_display_option(disp,
-      ALLEGRO_OPENGL_MAJOR_VERSION, 0);
-   minor = _al_get_suggested_display_option(disp,
-      ALLEGRO_OPENGL_MINOR_VERSION, 0);
+   major = al_get_new_display_option(ALLEGRO_OPENGL_MAJOR_VERSION, 0);
+   minor = al_get_new_display_option(ALLEGRO_OPENGL_MINOR_VERSION, 0);
 
    // TODO: request GLES context in GLES builds
    if ((disp->flags & ALLEGRO_OPENGL_3_0) || major != 0) {
@@ -1203,6 +1202,7 @@ static void display_thread_proc(void *arg)
    ALLEGRO_DISPLAY_WGL *wgl_disp = (void*)disp;
    ALLEGRO_DISPLAY_WIN *win_disp = (void*)disp;
    MSG msg;
+   int ret;
 
    /* So that we can call the functions using TLS from this thread. */
    al_set_new_display_flags(disp->flags);
@@ -1238,24 +1238,6 @@ static void display_thread_proc(void *arg)
       destroy_display_internals(wgl_disp);
       SetEvent(ndp->AckEvent);
       return;
-   }
-
-   /* FIXME: can't _al_win_create_window() do this? */
-   if ((disp->flags & ALLEGRO_FULLSCREEN) ||
-         (disp->flags & ALLEGRO_FULLSCREEN_WINDOW)) {
-      RECT rect;
-      rect.left = 0;
-      rect.right = disp->w;
-      rect.top  = 0;
-      rect.bottom = disp->h;
-      SetWindowPos(win_disp->window, 0, rect.left, rect.top,
-             rect.right - rect.left, rect.bottom - rect.top,
-             SWP_NOZORDER | SWP_FRAMECHANGED);
-   }
-
-   if (disp->flags & ALLEGRO_FULLSCREEN_WINDOW) {
-      bool frameless = true;
-      _al_win_set_window_frameless(disp, win_disp->window, frameless);
    }
 
    /* Yep, the following is really needed sometimes. */
@@ -1327,10 +1309,18 @@ static void display_thread_proc(void *arg)
 
    while (!win_disp->end_thread) {
       /* get a message from the queue */
-      if (GetMessage(&msg, NULL, 0, 0) != 0)
+      if ((ret = GetMessage(&msg, NULL, 0, 0)) == 0) {
+         /* WM_QUIT received */
+         break;
+      }
+      else if (ret != -1) {
          DispatchMessage(&msg);
-      else
-         break;                 /* WM_QUIT received or error (GetMessage returned -1)  */
+      }
+      else {
+         /* -1 indicates error */
+         ALLEGRO_DEBUG("GetMessage returned -1 (error %d)\n" , GetLastError());
+         break;
+      }
    }
 
    ALLEGRO_INFO("wgl display thread exits\n");
