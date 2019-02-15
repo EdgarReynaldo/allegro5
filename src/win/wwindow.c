@@ -62,21 +62,26 @@ UINT _al_win_msg_suicide = 0;
 static void display_flags_to_window_styles(int flags,
    DWORD *style, DWORD *ex_style)
 {
-   if (flags & ALLEGRO_FULLSCREEN) {
+   ALLEGRO_ASSERT(style);
+   ALLEGRO_ASSERT(ex_style);
+   
+   if ((flags & ALLEGRO_FULLSCREEN) || 
+       (flags & ALLEGRO_FULLSCREEN_WINDOW) ||
+       (flags & ALLEGRO_TRANSLUCENT_WINDOW) ||
+       (flags & ALLEGRO_FRAMELESS)) {
       *style = WS_POPUP;
-      *ex_style = WS_EX_APPWINDOW;
    }
-   else if (flags & ALLEGRO_MAXIMIZED) {
+   else if ((flags & ALLEGRO_MAXIMIZED) ||
+            (flags & ALLEGRO_RESIZABLE)) {
       *style = WS_OVERLAPPEDWINDOW;
-      *ex_style = WS_EX_APPWINDOW;
-   }
-   else if (flags & ALLEGRO_RESIZABLE) {
-      *style = WS_OVERLAPPEDWINDOW;
-      *ex_style = WS_EX_APPWINDOW | WS_EX_OVERLAPPEDWINDOW;
    }
    else {
       *style = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-      *ex_style = WS_EX_APPWINDOW;
+   }
+
+   *ex_style = WS_EX_APPWINDOW;
+   if (flags & ALLEGRO_RESIZABLE) {
+      *ex_style |= WS_EX_OVERLAPPEDWINDOW;
    }
 }
 
@@ -109,13 +114,15 @@ static void _al_win_get_window_center(
    int a = win_display->adapter;
    bool *is_fullscreen;
    ALLEGRO_MONITOR_INFO info;
-   RECT win_size;
 
    ALLEGRO_SYSTEM *sys = al_get_system_driver();
-   unsigned int num;
+   const unsigned int num = al_get_num_video_adapters();
    unsigned int i;
    unsigned int fullscreen_found = 0;
-   num = al_get_num_video_adapters();
+
+   ALLEGRO_ASSERT(out_x);
+   ALLEGRO_ASSERT(out_y);
+
    is_fullscreen = al_calloc(num, sizeof(bool));
    for (i = 0; i < sys->displays._size; i++) {
       ALLEGRO_DISPLAY **dptr = _al_vector_ref(&sys->displays, i);
@@ -138,11 +145,8 @@ static void _al_win_get_window_center(
 
    al_get_monitor_info(a, &info);
 
-   win_size.left = info.x1 + (info.x2 - info.x1 - width) / 2;
-   win_size.top = info.y1 + (info.y2 - info.y1 - height) / 2;
-
-   *out_x = win_size.left;
-   *out_y = win_size.top;
+   *out_x = info.x1 + (info.x2 - info.x1 - width) / 2;
+   *out_y = info.y1 + (info.y2 - info.y1 - height) / 2;
 }
 
 HWND _al_win_create_window(ALLEGRO_DISPLAY *display, int width, int height, int flags)
@@ -154,7 +158,11 @@ HWND _al_win_create_window(ALLEGRO_DISPLAY *display, int width, int height, int 
    bool center = false;
    ALLEGRO_DISPLAY_WIN *win_display = (ALLEGRO_DISPLAY_WIN *)display;
    WINDOWINFO wi;
-   int lsize, rsize, tsize, bsize; // left, right, top, bottom border sizes
+   // border sizes
+   int lsize = 0;
+   int rsize = 0;
+   int tsize = 0;
+   int bsize = 0;
    wchar_t* window_title;
 
    wi.cbSize = sizeof(WINDOWINFO);
@@ -184,26 +192,17 @@ HWND _al_win_create_window(ALLEGRO_DISPLAY *display, int width, int height, int 
    if (_al_win_register_touch_window)
       _al_win_register_touch_window(my_window, 0);
 
-   GetWindowInfo(my_window, &wi);
+   if (!(flags & ALLEGRO_FULLSCREEN) && !(flags & ALLEGRO_FULLSCREEN_WINDOW)) {
+      GetWindowInfo(my_window, &wi);
 
-   lsize = (wi.rcClient.left - wi.rcWindow.left);
-   tsize = (wi.rcClient.top - wi.rcWindow.top);
-   rsize = (wi.rcWindow.right - wi.rcClient.right);
-   bsize = (wi.rcWindow.bottom - wi.rcClient.bottom);
-
-   SetWindowPos(my_window, 0, 0, 0,
-      width+lsize+rsize,
-      height+tsize+bsize,
-      SWP_NOZORDER | SWP_NOMOVE);
-   SetWindowPos(my_window, 0, pos_x-lsize, pos_y-tsize,
-      0, 0,
-      SWP_NOZORDER | SWP_NOSIZE);
-
-   if (flags & ALLEGRO_FRAMELESS) {
-      SetWindowLong(my_window, GWL_STYLE, WS_VISIBLE);
-      SetWindowLong(my_window, GWL_EXSTYLE, WS_EX_APPWINDOW);
-      SetWindowPos(my_window, 0, pos_x, pos_y, width, height, SWP_NOZORDER | SWP_FRAMECHANGED);
+      lsize = (wi.rcClient.left - wi.rcWindow.left);
+      tsize = (wi.rcClient.top - wi.rcWindow.top);
+      rsize = (wi.rcWindow.right - wi.rcClient.right);
+      bsize = (wi.rcWindow.bottom - wi.rcClient.bottom);
    }
+
+   SetWindowPos(my_window , 0 , pos_x - lsize , pos_y - tsize ,
+               width + lsize + rsize , height + tsize + bsize , SWP_NOZORDER | SWP_FRAMECHANGED);
 
    ShowWindow(my_window, SW_SHOW);
 
@@ -1158,32 +1157,30 @@ void _al_win_get_window_position(HWND window, int *x, int *y)
 void _al_win_set_window_frameless(ALLEGRO_DISPLAY *display, HWND hWnd,
    bool frameless)
 {
+   int flags = display->flags;
    int w = display->w;
    int h = display->h;
+   DWORD style = 0;
+   DWORD exStyle = 0;
 
-   if (frameless) {
-      SetWindowLong(hWnd, GWL_STYLE, WS_VISIBLE);
-      SetWindowLong(hWnd, GWL_EXSTYLE, WS_EX_APPWINDOW);
-      SetWindowPos(hWnd, 0, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
-   }
-   else {
+   if (frameless) {flags |= ALLEGRO_FRAMELESS;}
+   else {flags &= ~ALLEGRO_FRAMELESS;}
+   
+   display_flags_to_window_styles(flags, &style, &exStyle);
+   if (!frameless) {
       RECT r;
-      DWORD style;
-      DWORD exStyle;
-
-      display_flags_to_window_styles(display->flags, &style, &exStyle);
-      style |= WS_VISIBLE;
-
       GetWindowRect(hWnd, &r);
       AdjustWindowRectEx(&r, style, false, exStyle);
-
       w = r.right - r.left;
       h = r.bottom - r.top;
-
-      SetWindowLong(hWnd, GWL_STYLE, style);
-      SetWindowLong(hWnd, GWL_EXSTYLE, exStyle);
-      SetWindowPos(hWnd, 0, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
    }
+   
+   SetWindowLong(hWnd, GWL_STYLE , style);
+   SetWindowLong(hWnd, GWL_EXSTYLE, exStyle);
+   SetWindowPos(hWnd, 0, 0, 0, w, h, 
+                SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
+                
+/**   display->flags = flags; Ideally we should set this flag */
 }
 
 
@@ -1197,14 +1194,15 @@ bool _al_win_set_display_flag(ALLEGRO_DISPLAY *display, int flag, bool onoff)
 
    switch (flag) {
       case ALLEGRO_FRAMELESS: {
+         _al_win_set_window_frameless(display, win_display->window,
+            onoff);
          if (onoff) {
             display->flags |= ALLEGRO_FRAMELESS;
          }
          else {
             display->flags &= ~ALLEGRO_FRAMELESS;
          }
-         _al_win_set_window_frameless(display, win_display->window,
-            (display->flags & ALLEGRO_FRAMELESS));
+         ShowWindow(win_display->window , SW_SHOWNORMAL);
          return true;
       }
 
@@ -1218,15 +1216,8 @@ bool _al_win_set_display_flag(ALLEGRO_DISPLAY *display, int flag, bool onoff)
             return true;
          }
 
-         if (onoff) {
-            /* Switch off frame in fullscreen window mode. */
-            _al_win_set_window_frameless(display, win_display->window, true);
-         }
-         else {
-            /* Respect display flag in windowed mode. */
-            _al_win_set_window_frameless(display, win_display->window,
-               (display->flags & ALLEGRO_FRAMELESS));
-         }
+         // Hide the window temporarily
+         ShowWindow(win_display->window , SW_HIDE);
 
          if (onoff) {
             int adapter = win_display->adapter;
@@ -1241,10 +1232,18 @@ bool _al_win_set_display_flag(ALLEGRO_DISPLAY *display, int flag, bool onoff)
             display->h = win_display->toggle_h;
          }
 
+         if (onoff) {
+            /* Switch off frame in fullscreen window mode. */
+            _al_win_set_window_frameless(display, win_display->window, true);
+         }
+         else {
+            /* Respect display flag in windowed mode. */
+            _al_win_set_window_frameless(display, win_display->window,
+               (display->flags & ALLEGRO_FRAMELESS));
+         }
+
          ASSERT(!!(display->flags & ALLEGRO_FULLSCREEN_WINDOW) == onoff);
 
-         // Hide the window temporarily
-         SetWindowPos(win_display->window, 0, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOSIZE | SWP_NOZORDER | SWP_NOMOVE);
 
          al_resize_display(display, display->w, display->h);
 
@@ -1266,16 +1265,20 @@ bool _al_win_set_display_flag(ALLEGRO_DISPLAY *display, int flag, bool onoff)
             GetWindowInfo(win_display->window, &wi);
             bw = (wi.rcClient.left - wi.rcWindow.left) + (wi.rcWindow.right - wi.rcClient.right),
             bh = (wi.rcClient.top - wi.rcWindow.top) + (wi.rcWindow.bottom - wi.rcClient.bottom),
+            SetWindowPos(win_display->window , HWND_TOP , pos_x - bw/2 , pos_y - bh/2 ,
+                         display->w + bw , display->h + bh , SWP_FRAMECHANGED);
+#if 0
             SetWindowPos(
                win_display->window, HWND_TOP, 0, 0, display->w+bw, display->h+bh, SWP_NOMOVE
             );
             SetWindowPos(
                win_display->window, HWND_TOP, pos_x-bw/2, pos_y-bh/2, 0, 0, SWP_NOSIZE
             );
+#endif
          }
 
          // Show the window again
-         SetWindowPos(win_display->window, 0, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOZORDER | SWP_NOMOVE);
+         ShowWindow(win_display->window , SW_SHOWNORMAL);
 
          // Clear the window to black
          clear_window(win_display->window, display->w, display->h);
