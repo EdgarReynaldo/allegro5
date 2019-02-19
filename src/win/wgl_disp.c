@@ -1318,7 +1318,7 @@ static void display_thread_proc(void *arg)
       }
       else {
          /* -1 indicates error */
-         ALLEGRO_DEBUG("GetMessage returned -1 (error %d)\n" , GetLastError());
+         ALLEGRO_DEBUG("GetMessage returned -1 (error %lu)\n" , GetLastError());
          break;
       }
    }

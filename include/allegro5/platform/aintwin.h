@@ -86,11 +86,13 @@ struct ALLEGRO_DISPLAY_WIN
     */
    bool ignore_resize;
 
-   /* Size to reset to when al_set_display_flag(FULLSCREEN_WINDOW, false)
-    * is called.
+   /* Size and position to reset to when 
+    * al_set_display_flag(ALLEGRO_FULLSCREEN_WINDOW, false) is called.
     */
    int toggle_w;
    int toggle_h;
+   int win_x;
+   int win_y;
 
    /* A list of user callbacks associated with the window messages */
    _AL_VECTOR msg_callbacks;

@@ -1157,30 +1157,46 @@ void _al_win_get_window_position(HWND window, int *x, int *y)
 void _al_win_set_window_frameless(ALLEGRO_DISPLAY *display, HWND hWnd,
    bool frameless)
 {
+   ALLEGRO_DISPLAY_WIN* win_disp = (ALLEGRO_DISPLAY_WIN*)display;
    int flags = display->flags;
    int w = display->w;
    int h = display->h;
    DWORD style = 0;
    DWORD exStyle = 0;
 
+   RECT win_size;
+   POINT win_pos;
+   WINDOWINFO wi;
+
    if (frameless) {flags |= ALLEGRO_FRAMELESS;}
    else {flags &= ~ALLEGRO_FRAMELESS;}
    
    display_flags_to_window_styles(flags, &style, &exStyle);
-   if (!frameless) {
-      RECT r;
-      GetWindowRect(hWnd, &r);
-      AdjustWindowRectEx(&r, style, false, exStyle);
-      w = r.right - r.left;
-      h = r.bottom - r.top;
-   }
+
+   /// Client starts at 0,0
+   win_pos.x = 0;
+   win_pos.y = 0;
+   ClientToScreen(win_disp->window , &win_pos);
+   win_size.left = win_pos.x;
+   win_size.top = win_pos.y;
+
+   /// Client ends at w,h
+   win_pos.x = w;
+   win_pos.y = h;
+   ClientToScreen(win_disp->window , &win_pos);
+   win_size.right = win_pos.x;
+   win_size.bottom = win_pos.y;
    
+   wi.cbSize = sizeof(WINDOWINFO);
+   GetWindowInfo(win_disp->window, &wi);
+
+   AdjustWindowRectEx(&win_size, style, false, exStyle);/// expects you to pass the desired client area
+
    SetWindowLong(hWnd, GWL_STYLE , style);
    SetWindowLong(hWnd, GWL_EXSTYLE, exStyle);
-   SetWindowPos(hWnd, 0, 0, 0, w, h, 
-                SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
-                
-/**   display->flags = flags; Ideally we should set this flag */
+   SetWindowPos(hWnd, 0, win_size.left, win_size.top , 
+                win_size.right - win_size.left , win_size.bottom - win_size.top ,
+                SWP_NOZORDER | SWP_FRAMECHANGED);
 }
 
 
@@ -1260,13 +1276,20 @@ bool _al_win_set_display_flag(ALLEGRO_DISPLAY *display, int flag, bool onoff)
             // Unset the topmost flag
             SetWindowPos(win_display->window, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 
-            // Center the window
+            // Restore the old window position
+            
+            // Center the window - NO this is wrong
             _al_win_get_window_center(win_display, display->w, display->h, &pos_x, &pos_y);
             GetWindowInfo(win_display->window, &wi);
             bw = (wi.rcClient.left - wi.rcWindow.left) + (wi.rcWindow.right - wi.rcClient.right),
             bh = (wi.rcClient.top - wi.rcWindow.top) + (wi.rcWindow.bottom - wi.rcClient.bottom),
             SetWindowPos(win_display->window , HWND_TOP , pos_x - bw/2 , pos_y - bh/2 ,
                          display->w + bw , display->h + bh , SWP_FRAMECHANGED);
+
+
+
+
+
 #if 0
             SetWindowPos(
                win_display->window, HWND_TOP, 0, 0, display->w+bw, display->h+bh, SWP_NOMOVE
