@@ -791,44 +791,50 @@ static bool d3d_create_device(ALLEGRO_DISPLAY_D3D *d,
       ALLEGRO_INFO("Using no depth stencil buffer\n");
    }
 
-   if (d->samples) {
-      d3d_pp.MultiSampleType = D3DMULTISAMPLE_NONMASKABLE;
-      d3d_pp.MultiSampleQuality = d->samples;
-   }
-   else
-      d3d_pp.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
-
    if (d->single_buffer) {
       d3d_pp.SwapEffect = D3DSWAPEFFECT_COPY;
    }
    else {
       d3d_pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
    }
+
+   if (d->samples) {
+      d3d_pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+      d3d_pp.MultiSampleType = (D3DMULTISAMPLE_TYPE)d->samples;
+      d3d_pp.MultiSampleQuality = d->sample_quality - 1;
+   }
+   else
+      d3d_pp.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
+
    d3d_pp.hDeviceWindow = win_display->window;
 
    if (adapter < 0)
       adapter = 0;
 
-   if ((hr = _al_d3d->CreateDevice(adapter,
+   ALLEGRO_DEBUG("trying D3DCREATE_HARDWARE_VERTEXPROCESSING\n");
+   hr = _al_d3d->CreateDevice(adapter,
          D3DDEVTYPE_HAL, win_display->window,
          D3DCREATE_HARDWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED,
-         &d3d_pp, (LPDIRECT3DDEVICE9 *)&d->device)) != D3D_OK) {
+         &d3d_pp, (LPDIRECT3DDEVICE9 *)&d->device);
+   if (hr != D3D_OK) {
       ALLEGRO_DEBUG("trying D3DCREATE_SOFTWARE_VERTEXPROCESSING\n");
-      if ((hr = _al_d3d->CreateDevice(adapter,
+      hr = _al_d3d->CreateDevice(adapter,
             D3DDEVTYPE_HAL, win_display->window,
             D3DCREATE_SOFTWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED,
-            &d3d_pp, (LPDIRECT3DDEVICE9 *)&d->device)) != D3D_OK) {
+            &d3d_pp, (LPDIRECT3DDEVICE9 *)&d->device);
+      if (hr != D3D_OK) {
          ALLEGRO_DEBUG("trying D3DDEVTYPE_REF\n");
-         if ((hr = _al_d3d->CreateDevice(adapter,
+         hr = _al_d3d->CreateDevice(adapter,
                D3DDEVTYPE_REF, win_display->window,
                D3DCREATE_HARDWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED,
-               &d3d_pp, (LPDIRECT3DDEVICE9 *)&d->device)) != D3D_OK) {
+               &d3d_pp, (LPDIRECT3DDEVICE9 *)&d->device);
+         if (hr != D3D_OK) {
             ALLEGRO_DEBUG("trying D3DDEVTYPE_REF|D3DCREATE_SOFTWARE_VERTEXPROCESSING\n");
-            if ((hr = _al_d3d->CreateDevice(adapter,
+            hr = _al_d3d->CreateDevice(adapter,
                   D3DDEVTYPE_REF, win_display->window,
                   D3DCREATE_SOFTWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED,
-                  &d3d_pp, (LPDIRECT3DDEVICE9 *)&d->device)) != D3D_OK) {
-
+                  &d3d_pp, (LPDIRECT3DDEVICE9 *)&d->device);
+            if (hr != D3D_OK) {
                ALLEGRO_ERROR("CreateDevice failed: %s\n", _al_d3d_error_string(hr));
                return 0;
             }
@@ -1444,6 +1450,7 @@ static void *d3d_display_thread_proc(void *arg)
          d3d_destroy_display(al_display);
          params->init_failed = true;
          SetEvent(params->AckEvent);
+         ALLEGRO_DEBUG("Failed to create d3d device in windowed mode\n");
          return NULL;
       }
    }
@@ -1678,7 +1685,8 @@ static ALLEGRO_DISPLAY_D3D *d3d_create_display_internals(
       ALLEGRO_DEBUG("Trying format %d.\n", eds->index);
 
       d3d_display->depth_stencil_format = d3d_get_depth_stencil_format(eds);
-      d3d_display->samples = eds->settings[ALLEGRO_SAMPLES];
+      d3d_display->samples = eds->settings[ALLEGRO_SAMPLE_BUFFERS];
+      d3d_display->sample_quality = eds->settings[ALLEGRO_SAMPLES];
       d3d_display->single_buffer = eds->settings[ALLEGRO_SINGLE_BUFFER] ? true : false;
       d3d_display->vsync = eds->settings[ALLEGRO_VSYNC] == 1;
 
