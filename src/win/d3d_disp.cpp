@@ -422,10 +422,13 @@ static int d3d_get_default_refresh_rate(UINT adapter)
 static bool d3d_create_fullscreen_device(ALLEGRO_DISPLAY_D3D *d,
    int format, int refresh_rate, int flags)
 {
-   int ret;
+   HRESULT ret;
    bool reset_all = false;
    ALLEGRO_DISPLAY_WIN *win_display = &d->win_display;
    ALLEGRO_DISPLAY *al_display = &win_display->display;
+   const bool msaa = al_get_new_display_option(ALLEGRO_SAMPLE_BUFFERS , 0);
+   int sample_quality = 0;
+   D3DDEVTYPE dev_type = D3DDEVTYPE_HAL;
 
    (void)flags;
 
@@ -458,10 +461,15 @@ static bool d3d_create_fullscreen_device(ALLEGRO_DISPLAY_D3D *d,
    else
       d3d_pp.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
 
+   d3d_pp.MultiSampleType = D3DMULTISAMPLE_NONE;
    if (d->single_buffer) {
       d3d_pp.SwapEffect = D3DSWAPEFFECT_COPY;
+      d->samples = 0;
    }
    else {
+      if (msaa) {
+         d3d_pp.MultiSampleType = D3DMULTISAMPLE_NONMASKABLE;
+      }
       d3d_pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
    }
    d3d_pp.hDeviceWindow = win_display->window;
@@ -494,19 +502,20 @@ static bool d3d_create_fullscreen_device(ALLEGRO_DISPLAY_D3D *d,
       mode.ScanLineOrdering = D3DSCANLINEORDERING_PROGRESSIVE;
 
       if ((ret = d3d->CreateDeviceEx(win_display->adapter,
-               D3DDEVTYPE_HAL, fullscreen_focus_window,
+               dev_type, fullscreen_focus_window,
                D3DCREATE_HARDWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED|D3DCREATE_SCREENSAVER,
                &d3d_pp, &mode, (IDirect3DDevice9Ex **)(&d->device))) != D3D_OK) {
          if ((ret = d3d->CreateDeviceEx(win_display->adapter,
-                  D3DDEVTYPE_HAL, fullscreen_focus_window,
+                  dev_type, fullscreen_focus_window,
                   D3DCREATE_SOFTWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED|D3DCREATE_SCREENSAVER,
                   &d3d_pp, &mode, (IDirect3DDevice9Ex **)(&d->device))) != D3D_OK) {
+            dev_type = D3DDEVTYPE_REF;
             if ((ret = d3d->CreateDeviceEx(win_display->adapter,
-                     D3DDEVTYPE_REF, fullscreen_focus_window,
+                     dev_type, fullscreen_focus_window,
                      D3DCREATE_HARDWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED|D3DCREATE_SCREENSAVER,
                      &d3d_pp, &mode, (IDirect3DDevice9Ex **)(&d->device))) != D3D_OK) {
                if ((ret = d3d->CreateDeviceEx(win_display->adapter,
-                        D3DDEVTYPE_REF, fullscreen_focus_window,
+                        dev_type, fullscreen_focus_window,
                         D3DCREATE_SOFTWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED|D3DCREATE_SCREENSAVER,
                         &d3d_pp, &mode, (IDirect3DDevice9Ex **)(&d->device))) != D3D_OK) {
                   switch (ret) {
@@ -526,8 +535,8 @@ static bool d3d_create_fullscreen_device(ALLEGRO_DISPLAY_D3D *d,
                         ALLEGRO_ERROR("Direct3D Device creation failed.\n");
                         break;
                   }
-                  return 0;
-            }  }
+               }
+            }
          }
       }
    }
@@ -535,19 +544,20 @@ static bool d3d_create_fullscreen_device(ALLEGRO_DISPLAY_D3D *d,
 #endif
    {
       if ((ret = _al_d3d->CreateDevice(win_display->adapter,
-               D3DDEVTYPE_HAL, fullscreen_focus_window,
+               dev_type, fullscreen_focus_window,
                D3DCREATE_HARDWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED,
                &d3d_pp, &d->device)) != D3D_OK) {
          if ((ret = _al_d3d->CreateDevice(win_display->adapter,
-                  D3DDEVTYPE_HAL, fullscreen_focus_window,
+                  dev_type, fullscreen_focus_window,
                   D3DCREATE_SOFTWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED,
                   &d3d_pp, &d->device)) != D3D_OK) {
+            dev_type = D3DDEVTYPE_REF;
             if ((ret = _al_d3d->CreateDevice(win_display->adapter,
-                     D3DDEVTYPE_REF, fullscreen_focus_window,
+                     dev_type, fullscreen_focus_window,
                      D3DCREATE_HARDWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED,
                      &d3d_pp, &d->device)) != D3D_OK) {
                if ((ret = _al_d3d->CreateDevice(win_display->adapter,
-                        D3DDEVTYPE_REF, fullscreen_focus_window,
+                        dev_type, fullscreen_focus_window,
                         D3DCREATE_SOFTWARE_VERTEXPROCESSING|D3DCREATE_FPU_PRESERVE|D3DCREATE_MULTITHREADED,
                         &d3d_pp, &d->device)) != D3D_OK) {
                   switch (ret) {
@@ -567,13 +577,26 @@ static bool d3d_create_fullscreen_device(ALLEGRO_DISPLAY_D3D *d,
                         ALLEGRO_ERROR("Direct3D Device creation failed.\n");
                         break;
                   }
-                  return 0;
                }
             }
          }
       }
    }
 
+   if (ret != D3D_OK) {
+      return 0;
+   }
+   if (d3d_pp.SwapEffect == D3DSWAPEFFECT_DISCARD && msaa) {
+      if ((ret = CheckDeviceMultiSampleType(
+           win_display->adapter , dev_type , al_pixel_format_to_d3d(d->format) , FALSE , D3DMULTISAMPLE_NONMASKABLE , &sample_quality)) != D3D_OK) {
+         d->samples = 0;
+         ALLEGRO_WARN("CheckDeviceMultiSampleType failed.\n");
+      }
+      else {
+         d->samples = sample_quality;
+      }
+   }
+   
    d->device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &d->render_target);
 
    ALLEGRO_INFO("Fullscreen Direct3D device created.\n");
